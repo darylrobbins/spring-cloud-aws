@@ -92,11 +92,37 @@ public class CloudMapProperties {
         }
     }
 
-      private Service service;
+    public Instance getInstance() {
+        return instance;
+    }
+
+    public void setInstance(Instance instance) {
+        this.instance = instance;
+    }
+
+    private Service service;
     private Instance instance;
     private boolean enabled = true;
     private boolean register = true;
     private String region;
+    private boolean createNamespace = false;
+    private boolean createService = true;
+
+    public boolean isCreateNamespace() {
+        return createNamespace;
+    }
+
+    public void setCreateNamespace(boolean createNamespace) {
+        this.createNamespace = createNamespace;
+    }
+
+    public boolean isCreateService() {
+        return createService;
+    }
+
+    public void setCreateService(boolean createService) {
+        this.createService = createService;
+    }
 
     public String getRegion() {
         return region;

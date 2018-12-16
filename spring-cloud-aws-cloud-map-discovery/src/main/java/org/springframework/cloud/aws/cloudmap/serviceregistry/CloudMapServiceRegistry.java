@@ -18,6 +18,11 @@ package org.springframework.cloud.aws.cloudmap.serviceregistry;
 
 import com.amazonaws.services.servicediscovery.AWSServiceDiscoveryAsync;
 import com.amazonaws.services.servicediscovery.model.*;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.aws.cloudmap.CloudMapProperties;
 import org.springframework.cloud.aws.cloudmap.CloudMapServiceInstance;
 import org.springframework.cloud.client.serviceregistry.ServiceRegistry;
 
@@ -30,7 +35,12 @@ import static org.springframework.boot.actuate.health.Status.UNKNOWN;
 
 public class CloudMapServiceRegistry implements ServiceRegistry<CloudMapRegistration> {
 
+    private static final Log log = LogFactory.getLog(CloudMapServiceRegistry.class);
+
     private final AWSServiceDiscoveryAsync client;
+
+    @Autowired
+    private CloudMapProperties props = null;
 
     public CloudMapServiceRegistry(AWSServiceDiscoveryAsync client) {
         this.client = client;
@@ -38,6 +48,58 @@ public class CloudMapServiceRegistry implements ServiceRegistry<CloudMapRegistra
 
     @Override
     public void register(CloudMapRegistration registration) {
+
+        // Create namespace if it doesn't already exist
+        if (!namespaceExists(registration.getNamespace())) {
+
+            if (!props.isCreateNamespace()) {
+                throw new IllegalStateException("Namespace does not exist but configuration says not to create it");
+            }
+
+            Future<CreateHttpNamespaceResult> createNamespaceFuture =
+                    client.createHttpNamespaceAsync(new CreateHttpNamespaceRequest().withName(registration.getNamespace()));
+
+            while (!createNamespaceFuture.isDone()) {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException("Interrupted while creating namespace", e);
+                }
+            }
+
+            if (createNamespaceFuture.isCancelled()) {
+                throw new RuntimeException("Registration was cancelled");
+            }
+
+            log.info("Namespace created " + registration.getNamespace());
+        }
+
+        // Create service if it doesn't already exist
+        if (!serviceExists(registration.getServiceId())) {
+
+            if (!props.isCreateService()) {
+                throw new IllegalStateException("Service does not exist but configuration says not to create it");
+            }
+
+            try {
+                client.createService(new CreateServiceRequest()
+                        .withNamespaceId(registration.getNamespace())
+                        .withName(registration.getServiceId()));
+            } catch (InvalidInputException e) {
+                throw new RuntimeException("Could not create service due to invalid input", e);
+            } catch (ResourceLimitExceededException e) {
+                throw new RuntimeException("Could not create service, as resource limited exceeded. You likely need " +
+                        "to contact AWS support for a limit increased.", e);
+            } catch (NamespaceNotFoundException e) {
+                throw new RuntimeException("Could not create service, as namespace did not exist.", e);
+            } catch (ServiceAlreadyExistsException e) {
+                // ignore since we're already in the desired state
+            }
+
+            log.info("Service created " + registration.getServiceId());
+        }
+
+        // Register the service instance
         final Future<RegisterInstanceResult> future =
                 client.registerInstanceAsync(
                         new RegisterInstanceRequest()
@@ -95,5 +157,30 @@ public class CloudMapServiceRegistry implements ServiceRegistry<CloudMapRegistra
             default: // including UNKNOWN
                 return UNKNOWN.getCode();
         }
+    }
+
+    private boolean namespaceExists(String namespace) {
+        try {
+            client.getNamespace(new GetNamespaceRequest().withId(namespace));
+        } catch (NamespaceNotFoundException e) {
+            return false;
+        } catch (InvalidInputException e) {
+            log.warn("Invalid input when looking up namespace", e);
+        }
+
+        return true;
+    }
+
+    private boolean serviceExists(String service) {
+
+        try {
+            client.getService(new GetServiceRequest().withId(service));
+        } catch (ServiceNotFoundException e) {
+            return false;
+        } catch (InvalidInputException e) {
+            log.warn("Invalid input when looking up service", e);
+        }
+
+        return true;
     }
 }

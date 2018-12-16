@@ -64,6 +64,10 @@ public class CloudMapRegistration implements Registration {
         return CloudMapServiceInstance.getUri(serviceInstance);
     }
 
+    public String getNamespace() {
+        return getServiceInstance().getNamespace();
+    }
+
     @Override
     public Map<String, String> getMetadata() {
         return getServiceInstance().getMetadata();
